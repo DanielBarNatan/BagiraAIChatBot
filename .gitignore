@@ -1,0 +1,32 @@
+# Environment and secrets
+.env
+venv/
+.venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Data and vector DB (generated; optional: remove if you want to commit sample data)
+data/raw/
+data/cleaned/
+data/chunks/
+vector_db/chroma_store/*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
