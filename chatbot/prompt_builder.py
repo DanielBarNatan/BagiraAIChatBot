@@ -60,7 +60,13 @@ def build_prompt(
     """
     instruction = (
         "Answer the question using ONLY the context below. "
-        "If the answer cannot be found in the context, say you do not know. "
+        "If the context contains a clear and direct answer, provide it confidently with source citations. "
+        "If the context does not directly answer the question but contains related information, "
+        "provide a best-effort answer based on what you found and start your response with: "
+        "\"I couldn't find an exact answer, but based on related information I found, "
+        "here is what may be relevant (note — this may not be fully accurate):\"\n"
+        "Only if the context contains absolutely nothing relevant to the question, "
+        "say you do not know.\n"
         "When citing sources, reproduce the markdown link from the source label "
         "exactly as it appears (do not strip or rewrite the URL).\n\n"
     )
@@ -73,3 +79,13 @@ def build_prompt(
     return (
         f"{instruction}Context:\n{context_block}\n\nQuestion:\n{user_question}"
     )
+
+
+def build_stats_context(stats_text: str, user_question: str) -> str:
+    """Build a prompt that includes structured PBI statistics for aggregate queries."""
+    instruction = (
+        "You are given structured PBI statistics data below. "
+        "Use this data to answer the user's question accurately. "
+        "Present numbers clearly and format your answer in a readable way.\n\n"
+    )
+    return f"{instruction}PBI Statistics:\n{stats_text}\n\nQuestion:\n{user_question}"

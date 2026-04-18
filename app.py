@@ -34,7 +34,7 @@ from config.settings import (
 # Page config (must be the first Streamlit command)
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="DevOps AI Knowledge Assistant",
+    page_title="Bagira AI Assistant",
     page_icon="🔍",
     layout="wide",
 )
@@ -168,7 +168,7 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 # Main area — chat interface
 # ---------------------------------------------------------------------------
-st.title("DevOps AI Knowledge Assistant")
+st.title("Bagira AI Assistant")
 st.caption("Ask questions about your system (Wiki + PBI). Answers are grounded in retrieved documents.")
 
 for msg in st.session_state.messages:

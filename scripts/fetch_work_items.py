@@ -1,8 +1,10 @@
 """
-Fetch Azure DevOps Work Items (PBI) and save as text under data/raw/pbi/.
+Fetch Azure DevOps Work Items (PBI, Bug, Task, Feature, Epic) and save as
+text under data/raw/pbi/.
 Uses PAT authentication. Run from project root so config is importable.
 """
 import base64
+import json
 import sys
 from pathlib import Path
 
@@ -45,24 +47,38 @@ def _auth_headers() -> dict:
     return {"Authorization": f"Basic {encoded}", "Content-Type": "application/json"}
 
 
+WORK_ITEM_TYPES = [
+    "Product Backlog Item",
+    "Bug",
+]
+
+
 def _wiql_query_ids(session: requests.Session, base_url: str) -> list[int]:
-    """Run Wiql to get all Product Backlog Item IDs."""
-    url = f"{base_url}/_apis/wit/wiql?api-version={API_VERSION}"
-    body = {
-        "query": (
-            "SELECT [System.Id], [System.Title], [System.Description], [System.State] "
-            "FROM WorkItems WHERE [System.WorkItemType] = 'Product Backlog Item' ORDER BY [System.ChangedDate] DESC"
-        )
-    }
-    r = session.post(url, headers=_auth_headers(), json=body, timeout=30)
-    r.raise_for_status()
-    data = r.json()
-    ids = []
-    for row in data.get("workItems", []) or []:
-        wid = row.get("id")
-        if wid is not None:
-            ids.append(int(wid))
-    return ids
+    """Run one WIQL query per work item type to stay under the 20,000 result limit."""
+    url = f"{base_url}/_apis/wit/wiql?api-version={API_VERSION}&$top=20000"
+    all_ids: list[int] = []
+    for wi_type in WORK_ITEM_TYPES:
+        extra_filter = ""
+        if wi_type == "Bug":
+            extra_filter = "AND [System.State] <> 'Removed' "
+        body = {
+            "query": (
+                "SELECT [System.Id] FROM WorkItems "
+                f"WHERE [System.WorkItemType] = '{wi_type}' "
+                f"{extra_filter}"
+                "ORDER BY [System.ChangedDate] DESC"
+            )
+        }
+        logger.info("Fetching %s IDs...", wi_type)
+        r = session.post(url, headers=_auth_headers(), json=body, timeout=30)
+        if r.status_code != 200:
+            logger.warning("WIQL failed for %s — status: %s, response: %s", wi_type, r.status_code, r.text)
+            continue
+        data = r.json()
+        type_ids = [int(row["id"]) for row in (data.get("workItems") or []) if row.get("id") is not None]
+        logger.info("  Found %s %s items", len(type_ids), wi_type)
+        all_ids.extend(type_ids)
+    return all_ids
 
 
 def _get_work_items_batch(session: requests.Session, base_url: str, ids: list[int]) -> list[dict]:
@@ -77,19 +93,38 @@ def _get_work_items_batch(session: requests.Session, base_url: str, ids: list[in
     return data.get("value", [])
 
 
+def _extract_person(field_value) -> str:
+    """Extract display name from an Azure DevOps identity field (dict or string)."""
+    if isinstance(field_value, dict):
+        return field_value.get("displayName", "")
+    return str(field_value) if field_value else ""
+
+
 def _work_item_to_text(wi: dict) -> str:
-    """Build a single text representation of a work item (title, description, state, acceptance criteria)."""
+    """Build a single text representation of a work item."""
     fields = wi.get("fields") or {}
     title = fields.get("System.Title") or fields.get("System.Id") or "Untitled"
+    wi_type = fields.get("System.WorkItemType") or ""
     state = fields.get("System.State") or ""
+    iteration = fields.get("System.IterationPath") or ""
+    created_by = _extract_person(fields.get("System.CreatedBy"))
+    assigned_to = _extract_person(fields.get("System.AssignedTo"))
     description = fields.get("System.Description") or ""
-    # Acceptance criteria often in custom field or "Microsoft.VSTS.Common.AcceptanceCriteria"
     acceptance = (
         fields.get("Microsoft.VSTS.Common.AcceptanceCriteria")
         or fields.get("Acceptance Criteria")
         or ""
     )
-    parts = [f"Title: {title}", f"State: {state}"]
+    parts = [f"Title: {title}"]
+    if wi_type:
+        parts.append(f"Type: {wi_type}")
+    parts.append(f"State: {state}")
+    if iteration:
+        parts.append(f"Iteration: {iteration}")
+    if created_by:
+        parts.append(f"Created By: {created_by}")
+    if assigned_to:
+        parts.append(f"Assigned To: {assigned_to}")
     if description:
         parts.append(f"Description:\n{description}")
     if acceptance:
@@ -97,10 +132,26 @@ def _work_item_to_text(wi: dict) -> str:
     return "\n\n".join(parts)
 
 
+def _work_item_to_index_entry(wi: dict) -> dict:
+    """Build a structured metadata dict for the work item index."""
+    fields = wi.get("fields") or {}
+    return {
+        "id": wi.get("id"),
+        "title": fields.get("System.Title") or "Untitled",
+        "work_item_type": fields.get("System.WorkItemType") or "",
+        "state": fields.get("System.State") or "",
+        "iteration": fields.get("System.IterationPath") or "",
+        "created_by": _extract_person(fields.get("System.CreatedBy")),
+        "assigned_to": _extract_person(fields.get("System.AssignedTo")),
+    }
+
+
 def fetch_work_items() -> int:
     """
-    Fetch all PBI work items and save to data/raw/pbi/pbi_{id}.txt.
-    Returns the number of PBIs saved.
+    Fetch all work items (PBI, Bug, Task, Feature, Epic) and save to
+    data/raw/pbi/pbi_{id}.txt.  Also writes data/raw/pbi/pbi_index.json
+    with structured metadata for aggregate queries.
+    Returns the number of work items saved.
     """
     validate(require_azure=True)
     ensure_dirs()
@@ -109,8 +160,9 @@ def fetch_work_items() -> int:
     base_url = f"https://dev.azure.com/{org}/{project}"
     session = requests.Session()
     ids = _wiql_query_ids(session, base_url)
-    logger.info("Found %s PBI work items", len(ids))
+    logger.info("Found %s work items", len(ids))
     saved = 0
+    index_entries: list[dict] = []
     for i in range(0, len(ids), BATCH_SIZE):
         batch = ids[i : i + BATCH_SIZE]
         try:
@@ -125,8 +177,11 @@ def fetch_work_items() -> int:
             text = _work_item_to_text(wi)
             out_path = DATA_RAW_PBI / f"pbi_{wid}.txt"
             out_path.write_text(text, encoding="utf-8")
+            index_entries.append(_work_item_to_index_entry(wi))
             saved += 1
-    logger.info("Saved %s PBI files to %s", saved, DATA_RAW_PBI)
+    index_path = DATA_RAW_PBI / "pbi_index.json"
+    index_path.write_text(json.dumps(index_entries, ensure_ascii=False, indent=2), encoding="utf-8")
+    logger.info("Saved %s work item files + pbi_index.json to %s", saved, DATA_RAW_PBI)
     return saved
 
 
