@@ -41,6 +41,8 @@ def main():
         print("Run: python scripts/generate_embeddings.py")
         sys.exit(1)
 
+    history: list[dict] = []
+
     while True:
         try:
             user_input = input("You: ").strip()
@@ -51,7 +53,9 @@ def main():
             break
         print("Searching...")
         try:
-            reply, sources = answer(user_input)
+            reply, sources = answer(user_input, history=history)
+            history.append({"role": "user", "content": user_input})
+            history.append({"role": "assistant", "content": reply})
             print(f"Assistant: {reply}\n")
             if SHOW_SOURCES and sources:
                 org = get(AZURE_DEVOPS_ORG)

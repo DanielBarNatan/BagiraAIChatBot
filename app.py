@@ -186,7 +186,7 @@ if question := st.chat_input("Ask a question..."):
         with st.spinner("Searching..."):
             try:
                 from chatbot.chat_engine import answer
-                reply, sources = answer(question)
+                reply, sources = answer(question, history=st.session_state.messages)
             except FileNotFoundError as exc:
                 reply = (
                     f"**Setup required:** {exc}\n\n"

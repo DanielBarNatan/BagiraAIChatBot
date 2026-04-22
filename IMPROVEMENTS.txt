@@ -1,0 +1,67 @@
+Bagira AI Assistant — Improvement Roadmap
+==========================================
+
+QUICK WINS (small effort, big impact)
+--------------------------------------
+[ ] 1. "New Conversation" button
+       Clear chat history from sidebar to save tokens on unrelated questions.
+
+[ ] 2. Suggested questions / quick actions
+       Show 3-4 clickable buttons when chat is empty (e.g. "Show work item summary",
+       "How many open bugs?", "What was completed this sprint?").
+
+[ ] 3. Export chat to clipboard / markdown
+       Button to copy the current conversation for pasting into emails, Teams, or
+       meeting notes.
+
+[ ] 4. Show response time
+       Display a small label under each answer like "Answered in 3.2s".
+
+
+MEDIUM EFFORT, HIGH VALUE
+--------------------------
+[ ] 5. Sidebar dashboard with live stats
+       Show knowledge base info in the sidebar: total PBIs, total Bugs,
+       last pipeline run time, number of chunks indexed.
+
+[ ] 6. Answer quality rating (thumbs up / thumbs down)
+       Simple feedback buttons after each answer. Save to a local JSON file
+       to track which questions the bot struggles with.
+
+[ ] 7. Predefined report templates
+       One-click reports: "Sprint Summary", "Bug Dashboard", "Team Workload".
+       Render as Streamlit tables instead of plain text.
+
+[ ] 8. Streamlit charts for statistics
+       When the bot returns stats, render bar charts instead of plain text.
+       Use st.bar_chart for visual dashboards.
+
+
+BIGGER EFFORTS THAT SET YOU APART
+-----------------------------------
+[ ] 9.  Hebrew language support
+        Add a prompt instruction so the bot answers in the same language as the
+        question. Works out of the box with OpenAI models.
+
+[ ] 10. Multi-project support
+        Let users pick which Azure DevOps project to query from a dropdown.
+        Each project gets its own index.
+
+[ ] 11. Microsoft Teams integration
+        Make the bot available directly in Teams so people don't need to open
+        a separate URL. Biggest adoption driver.
+
+[ ] 12. Role-based access
+        Add Azure AD SSO authentication. Managers and developers see different
+        suggested queries, data scoped to each user's projects.
+
+
+ALREADY DONE
+-------------
+[x] Best-effort answers instead of "I don't know"
+[x] PBI statistics and aggregate queries (counts by state, person, etc.)
+[x] Fetch multiple work item types (PBI + Bug)
+[x] Sprint / iteration awareness
+[x] Conversation memory (last 5 exchanges)
+[x] Created By / Assigned To fields
+[x] OpenAI tool calling (stats vs knowledge search routing)

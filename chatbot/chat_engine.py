@@ -128,10 +128,16 @@ def _execute_tool_call(name: str, arguments: dict) -> tuple[str, list[dict]]:
     return f"Unknown tool: {name}", []
 
 
-def answer(question: str) -> tuple[str, list[dict]]:
+MAX_HISTORY_PAIRS = 5
+
+
+def answer(question: str, history: list[dict] | None = None) -> tuple[str, list[dict]]:
     """
     Answer a user question using tool calling. The LLM decides whether to use
     RAG knowledge search, PBI statistics, or both.
+    Accepts optional conversation history (list of {"role", "content"} dicts)
+    to support follow-up questions. Only the last MAX_HISTORY_PAIRS exchanges
+    are included to control token usage.
     Returns (reply_text, deduplicated_sources).
     """
     client, model = _get_llm()
@@ -147,11 +153,18 @@ def answer(question: str) -> tuple[str, list[dict]]:
                 "2. knowledge_search — for detailed knowledge questions about system "
                 "architecture, features, wiki content, or work item descriptions.\n"
                 "Choose the appropriate tool based on the question. You may call both "
-                "if the question needs both statistics and detailed information."
+                "if the question needs both statistics and detailed information.\n"
+                "You have access to recent conversation history for context."
             ),
         },
-        {"role": "user", "content": question},
     ]
+
+    if history:
+        recent = history[-(MAX_HISTORY_PAIRS * 2):]
+        for msg in recent:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+
+    messages.append({"role": "user", "content": question})
 
     response = client.chat.completions.create(
         model=model,
