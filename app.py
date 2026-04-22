@@ -101,8 +101,14 @@ if "messages" not in st.session_state:
 # Sidebar — data pipeline controls
 # ---------------------------------------------------------------------------
 with st.sidebar:
+    st.header("Chat")
+    if st.button("New Conversation", use_container_width=True):
+        st.session_state.messages = []
+        st.rerun()
+
+    st.divider()
     st.header("Data Pipeline")
-    st.caption("Run pipeline steps to refresh the knowledge base.")
+    st.caption("Fetch and index data from Azure DevOps.")
 
     def _run_step(label: str, func, **kwargs):
         """Run a pipeline function with spinner and status feedback."""
@@ -119,9 +125,9 @@ with st.sidebar:
             from scripts.fetch_wiki import fetch_wiki
             _run_step("Fetch Wiki", fetch_wiki)
     with col2:
-        if st.button("Fetch PBIs", use_container_width=True):
+        if st.button("Fetch Work Items", use_container_width=True):
             from scripts.fetch_work_items import fetch_work_items
-            _run_step("Fetch PBIs", fetch_work_items)
+            _run_step("Fetch Work Items (PBI + Bug + Task)", fetch_work_items)
 
     col3, col4 = st.columns(2)
     with col3:
@@ -148,7 +154,7 @@ with st.sidebar:
 
         steps = [
             ("Fetch Wiki", fetch_wiki),
-            ("Fetch PBIs", fetch_work_items),
+            ("Fetch Work Items (PBI + Bug + Task)", fetch_work_items),
             ("Clean Documents", clean_documents),
             ("Chunk Documents", chunk_documents),
             ("Generate Embeddings", generate_embeddings),

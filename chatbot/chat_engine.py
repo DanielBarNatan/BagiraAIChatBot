@@ -154,7 +154,9 @@ def answer(question: str, history: list[dict] | None = None) -> tuple[str, list[
                 "architecture, features, wiki content, or work item descriptions.\n"
                 "Choose the appropriate tool based on the question. You may call both "
                 "if the question needs both statistics and detailed information.\n"
-                "You have access to recent conversation history for context."
+                "You have access to recent conversation history for context.\n"
+                "IMPORTANT: NEVER say you will look something up or promise to check. "
+                "Always call the appropriate tool immediately to get the answer."
             ),
         },
     ]

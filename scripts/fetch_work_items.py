@@ -50,34 +50,85 @@ def _auth_headers() -> dict:
 WORK_ITEM_TYPES = [
     "Product Backlog Item",
     "Bug",
+    "Task",
 ]
+
+WIQL_LIMIT = 20000
+OLDEST_YEAR = 2016
+
+
+def _wiql_run(session: requests.Session, url: str, query: str) -> list[int] | None:
+    """Execute a WIQL query and return IDs, or None on failure."""
+    body = {"query": query}
+    r = session.post(url, headers=_auth_headers(), json=body, timeout=30)
+    if r.status_code != 200:
+        logger.warning("WIQL failed — status: %s, response: %s", r.status_code, r.text)
+        return None
+    data = r.json()
+    return [int(row["id"]) for row in (data.get("workItems") or []) if row.get("id") is not None]
 
 
 def _wiql_query_ids(session: requests.Session, base_url: str) -> list[int]:
-    """Run one WIQL query per work item type to stay under the 20,000 result limit."""
-    url = f"{base_url}/_apis/wit/wiql?api-version={API_VERSION}&$top=20000"
+    """
+    Fetch all work item IDs, splitting by year when a type exceeds the
+    20,000 WIQL result limit.  Excludes items with State = 'Removed'.
+    """
+    url = f"{base_url}/_apis/wit/wiql?api-version={API_VERSION}&$top={WIQL_LIMIT}"
     all_ids: list[int] = []
+
     for wi_type in WORK_ITEM_TYPES:
-        extra_filter = ""
-        if wi_type == "Bug":
-            extra_filter = "AND [System.State] <> 'Removed' "
-        body = {
-            "query": (
+        logger.info("Fetching %s IDs...", wi_type)
+        query = (
+            "SELECT [System.Id] FROM WorkItems "
+            f"WHERE [System.WorkItemType] = '{wi_type}' "
+            "AND [System.State] <> 'Removed' "
+            "ORDER BY [System.ChangedDate] DESC"
+        )
+        ids = _wiql_run(session, url, query)
+
+        if ids is not None and len(ids) < WIQL_LIMIT:
+            logger.info("  Found %s %s items", len(ids), wi_type)
+            all_ids.extend(ids)
+            continue
+
+        logger.info("  %s exceeded limit or query failed — splitting by year...", wi_type)
+        type_ids: set[int] = set()
+        current_year = 2026
+        for year in range(current_year, OLDEST_YEAR - 1, -1):
+            year_query = (
                 "SELECT [System.Id] FROM WorkItems "
                 f"WHERE [System.WorkItemType] = '{wi_type}' "
-                f"{extra_filter}"
+                "AND [System.State] <> 'Removed' "
+                f"AND [System.CreatedDate] >= '{year}-01-01' "
+                f"AND [System.CreatedDate] < '{year + 1}-01-01' "
                 "ORDER BY [System.ChangedDate] DESC"
             )
-        }
-        logger.info("Fetching %s IDs...", wi_type)
-        r = session.post(url, headers=_auth_headers(), json=body, timeout=30)
-        if r.status_code != 200:
-            logger.warning("WIQL failed for %s — status: %s, response: %s", wi_type, r.status_code, r.text)
-            continue
-        data = r.json()
-        type_ids = [int(row["id"]) for row in (data.get("workItems") or []) if row.get("id") is not None]
-        logger.info("  Found %s %s items", len(type_ids), wi_type)
+            year_ids = _wiql_run(session, url, year_query)
+            if year_ids is None:
+                continue
+            if len(year_ids) >= WIQL_LIMIT:
+                # Split year into two halves
+                for half_start, half_end in [(f"{year}-01-01", f"{year}-07-01"), (f"{year}-07-01", f"{year + 1}-01-01")]:
+                    half_query = (
+                        "SELECT [System.Id] FROM WorkItems "
+                        f"WHERE [System.WorkItemType] = '{wi_type}' "
+                        "AND [System.State] <> 'Removed' "
+                        f"AND [System.CreatedDate] >= '{half_start}' "
+                        f"AND [System.CreatedDate] < '{half_end}' "
+                        "ORDER BY [System.ChangedDate] DESC"
+                    )
+                    half_ids = _wiql_run(session, url, half_query)
+                    if half_ids:
+                        type_ids.update(half_ids)
+                        logger.info("    %s (%s to %s): %s items", wi_type, half_start, half_end, len(half_ids))
+            else:
+                type_ids.update(year_ids)
+                if year_ids:
+                    logger.info("    %s %s: %s items", wi_type, year, len(year_ids))
+
+        logger.info("  Total %s: %s items", wi_type, len(type_ids))
         all_ids.extend(type_ids)
+
     return all_ids
 
 
