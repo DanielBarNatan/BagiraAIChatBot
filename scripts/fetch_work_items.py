@@ -186,6 +186,8 @@ def _work_item_to_text(wi: dict) -> str:
 def _work_item_to_index_entry(wi: dict) -> dict:
     """Build a structured metadata dict for the work item index."""
     fields = wi.get("fields") or {}
+    created_raw = fields.get("System.CreatedDate") or ""
+    created_date = created_raw[:10] if created_raw else ""
     return {
         "id": wi.get("id"),
         "title": fields.get("System.Title") or "Untitled",
@@ -194,6 +196,7 @@ def _work_item_to_index_entry(wi: dict) -> dict:
         "iteration": fields.get("System.IterationPath") or "",
         "created_by": _extract_person(fields.get("System.CreatedBy")),
         "assigned_to": _extract_person(fields.get("System.AssignedTo")),
+        "created_date": created_date,
     }
 
 

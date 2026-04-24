@@ -67,7 +67,7 @@ def _render_sources(sources: list[dict]) -> None:
         return
     base = _azure_base_url()
     wiki_id = get(AZURE_DEVOPS_WIKI_ID)
-    with st.expander("Sources", expanded=False):
+    with st.expander("View sources", expanded=False):
         for src in sources:
             doc_type = src.get("document_type", "unknown")
             if doc_type == "wiki":
@@ -90,6 +90,131 @@ def _render_sources(sources: list[dict]) -> None:
                 source_doc = _format_source_name(src.get("source_document", "unknown"))
                 st.markdown(f"- **\\[{doc_type}\\]** {source_doc}")
 
+
+# ---------------------------------------------------------------------------
+# Avatars
+# ---------------------------------------------------------------------------
+USER_AVATAR = (
+    "data:image/svg+xml,"
+    "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E"
+    "%3Ccircle cx='20' cy='20' r='20' fill='%23334155'/%3E"
+    "%3Ccircle cx='20' cy='15' r='6' fill='%2394a3b8'/%3E"
+    "%3Cellipse cx='20' cy='30' rx='10' ry='7' fill='%2394a3b8'/%3E"
+    "%3C/svg%3E"
+)
+BOT_AVATAR = (
+    "data:image/svg+xml,"
+    "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E"
+    "%3Ccircle cx='20' cy='20' r='20' fill='%231e1b4b'/%3E"
+    "%3Cpath d='M20 6l2.5 6.5L29 15l-6.5 2.5L20 24l-2.5-6.5L11 15l6.5-2.5z' "
+    "fill='%23a78bfa'/%3E"
+    "%3Cpath d='M30 22l1.5 3.5L35 27l-3.5 1.5L30 32l-1.5-3.5L25 27l3.5-1.5z' "
+    "fill='%23c4b5fd' opacity='0.7'/%3E"
+    "%3Cpath d='M12 25l1 2.5L16 29l-3 1L12 32.5l-1-2.5L8 29l3-1z' "
+    "fill='%23c4b5fd' opacity='0.5'/%3E"
+    "%3C/svg%3E"
+)
+
+# ---------------------------------------------------------------------------
+# Custom CSS — clean dark theme + RTL support
+# ---------------------------------------------------------------------------
+st.markdown("""
+<style>
+    /* ── RTL support ── */
+    .stMarkdown p, .stMarkdown li,
+    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
+        unicode-bidi: plaintext;
+        direction: auto;
+        text-align: start;
+    }
+
+    /* ── Chat message cards ── */
+    .stChatMessage {
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        border-radius: 0;
+        padding: 1.1rem 0.5rem;
+        margin-bottom: 0;
+    }
+
+    /* Avatar images */
+    .stChatMessage img[data-testid],
+    .stChatMessage [data-testid="chatAvatarIcon-user"],
+    .stChatMessage [data-testid="chatAvatarIcon-assistant"] {
+        border-radius: 50%;
+    }
+
+    /* ── Message text ── */
+    .stChatMessage [data-testid="stMarkdownContainer"] {
+        line-height: 1.7;
+        font-weight: 400;
+        color: rgba(235, 235, 245, 0.88);
+    }
+
+    /* ── Chat input ── */
+    .stChatInput > div {
+        background: #1a1a2e !important;
+        border: 1px solid #2a2a3e !important;
+        border-radius: 24px !important;
+        transition: border-color 0.2s ease;
+    }
+    .stChatInput > div:focus-within {
+        border-color: #5b5ea6 !important;
+    }
+
+    /* ── Sources expander ── */
+    .stChatMessage .stExpander {
+        border: 1px solid #1e1e30;
+        border-radius: 8px;
+        background: #13131f;
+        margin-top: 0.6rem;
+    }
+    .stChatMessage .stExpander summary {
+        font-size: 0.8rem;
+        font-weight: 500;
+        color: rgba(235, 235, 245, 0.5);
+    }
+    .stChatMessage .stExpander [data-testid="stMarkdownContainer"] {
+        font-size: 0.84rem;
+    }
+
+    /* ── Sidebar ── */
+    [data-testid="stSidebar"] {
+        background: #0d0d17 !important;
+        border-right: 1px solid #1a1a2e;
+    }
+    [data-testid="stSidebar"] .stButton > button {
+        border-radius: 8px;
+        border: 1px solid #252538;
+        background: #151525;
+        transition: all 0.15s ease;
+    }
+    [data-testid="stSidebar"] .stButton > button:hover {
+        background: #1c1c30;
+        border-color: #5b5ea6;
+    }
+
+    /* ── Custom header ── */
+    .bagira-header {
+        padding: 0.25rem 0 1rem 0;
+        border-bottom: 1px solid #1a1a2e;
+        margin-bottom: 0.5rem;
+    }
+    .bagira-header h1 {
+        font-size: 1.75rem;
+        font-weight: 600;
+        margin: 0 0 0.2rem 0;
+        color: #c4bfe0;
+    }
+    .bagira-header p {
+        font-size: 0.84rem;
+        color: rgba(235, 235, 245, 0.35);
+        margin: 0;
+        font-weight: 400;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # Session state
@@ -174,22 +299,29 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 # Main area — chat interface
 # ---------------------------------------------------------------------------
-st.title("Bagira AI Assistant")
-st.caption("Ask questions about your system (Wiki + PBI). Answers are grounded in retrieved documents.")
+st.markdown(
+    '<div class="bagira-header">'
+    "<h1>Bagira AI Assistant</h1>"
+    "<p>Ask about your system (Wiki + PBI) in English or Hebrew "
+    "| שאל שאלות על המערכת בעברית או באנגלית</p>"
+    "</div>",
+    unsafe_allow_html=True,
+)
 
 for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
+    _av = BOT_AVATAR if msg["role"] == "assistant" else USER_AVATAR
+    with st.chat_message(msg["role"], avatar=_av):
         st.markdown(msg["content"])
         if msg["role"] == "assistant" and SHOW_SOURCES:
             _render_sources(msg.get("sources", []))
 
-if question := st.chat_input("Ask a question..."):
+if question := st.chat_input("Ask a question... | ...שאל שאלה"):
     st.session_state.messages.append({"role": "user", "content": question})
-    with st.chat_message("user"):
+    with st.chat_message("user", avatar=USER_AVATAR):
         st.markdown(question)
 
-    with st.chat_message("assistant"):
-        with st.spinner("Searching..."):
+    with st.chat_message("assistant", avatar=BOT_AVATAR):
+        with st.spinner("Thinking..."):
             try:
                 from chatbot.chat_engine import answer
                 reply, sources = answer(question, history=st.session_state.messages)

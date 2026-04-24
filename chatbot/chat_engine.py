@@ -41,11 +41,11 @@ TOOLS = [
             "name": "work_item_statistics",
             "description": (
                 "Query structured Azure DevOps work item data for aggregate or "
-                "statistical questions. Covers PBIs, Bugs, Tasks, Features, and Epics. "
+                "statistical questions. Covers PBIs, Bugs, and Tasks. "
                 "Use this for questions about counts, totals, breakdowns by state "
                 "(Done, Active, Removed, New, etc.), by work item type, by sprint/"
-                "iteration, or questions about how many items a specific person "
-                "created or is assigned to."
+                "iteration, by creation date, or questions about how many items "
+                "a specific person created or is assigned to."
             ),
             "parameters": {
                 "type": "object",
@@ -61,7 +61,7 @@ TOOLS = [
                     },
                     "field": {
                         "type": "string",
-                        "enum": ["state", "work_item_type", "iteration", "created_by", "assigned_to"],
+                        "enum": ["state", "work_item_type", "iteration", "created_by", "assigned_to", "created_date"],
                         "description": "The field to query on. Required for count_by_field and items_by_field.",
                     },
                     "value": {
@@ -69,7 +69,8 @@ TOOLS = [
                         "description": (
                             "The value to match. Required for items_by_field. "
                             "Examples: a state like 'Done', a type like 'Bug', "
-                            "an iteration like 'ProjectName\\Sprint 24', or a person's name."
+                            "an iteration like 'ProjectName\\Sprint 24', a person's name, "
+                            "or a date/prefix like '2026', '2026-03', or '2026-03-15'."
                         ),
                     },
                 },
@@ -148,15 +149,20 @@ def answer(question: str, history: list[dict] | None = None) -> tuple[str, list[
             "content": (
                 "You are a DevOps AI Knowledge Assistant. You have two tools:\n"
                 "1. work_item_statistics — for aggregate/statistical questions about "
-                "work items (PBIs, Bugs, Tasks, Features, Epics). Supports counts by "
-                "state, by type, by sprint/iteration, by person, and listing items.\n"
+                "work items (PBIs, Bugs, Tasks). Supports counts by "
+                "state, by type, by sprint/iteration, by person, by creation date, "
+                "and listing items.\n"
                 "2. knowledge_search — for detailed knowledge questions about system "
                 "architecture, features, wiki content, or work item descriptions.\n"
                 "Choose the appropriate tool based on the question. You may call both "
                 "if the question needs both statistics and detailed information.\n"
                 "You have access to recent conversation history for context.\n"
                 "IMPORTANT: NEVER say you will look something up or promise to check. "
-                "Always call the appropriate tool immediately to get the answer."
+                "Always call the appropriate tool immediately to get the answer.\n"
+                "LANGUAGE: Always reply in the same language the user writes in. "
+                "If the user writes in Hebrew, respond in Hebrew. "
+                "If the user writes in English, respond in English. "
+                "Keep technical terms, work item titles, and field names in their original language."
             ),
         },
     ]

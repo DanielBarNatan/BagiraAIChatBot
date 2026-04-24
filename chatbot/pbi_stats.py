@@ -1,9 +1,10 @@
 """
 Structured work item statistics from pbi_index.json.
-Provides aggregate queries (counts by state, type, iteration, person) that RAG cannot answer.
+Provides aggregate queries (counts by state, type, iteration, person, date) that RAG cannot answer.
 """
 import json
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 
 from config.settings import DATA_RAW_PBI
@@ -32,16 +33,25 @@ def invalidate_cache() -> None:
 
 
 def count_by_field(field: str) -> dict[str, int]:
-    """Return {value: count} for a given field (state, work_item_type, iteration, created_by, assigned_to)."""
+    """Return {value: count} for a given field."""
     index = load_index()
+    if field == "created_date":
+        counter = Counter(
+            (item.get("created_date") or "Unknown")[:7]  # group by YYYY-MM
+            for item in index
+        )
+        return dict(sorted(counter.items()))
     counter = Counter(item.get(field, "") or "Unknown" for item in index)
     return dict(counter.most_common())
 
 
 def items_by_field(field: str, value: str) -> list[dict]:
-    """Return PBI items where *field* matches *value* (case-insensitive)."""
+    """Return PBI items where *field* matches *value* (case-insensitive).
+    For created_date, supports prefix matching (e.g. '2026', '2026-03', '2026-03-15')."""
     index = load_index()
     value_lower = value.lower()
+    if field == "created_date":
+        return [item for item in index if (item.get("created_date") or "").startswith(value)]
     return [item for item in index if (item.get(field) or "").lower() == value_lower]
 
 
@@ -102,6 +112,8 @@ def query(action: str, field: str = "", value: str = "") -> str:
         lines = [f"Found {len(items)} work items where {field} = '{value}':"]
         for item in items:
             wi_type = item.get('work_item_type', 'PBI')
-            lines.append(f"  [{wi_type}] #{item['id']}: {item['title']} (State: {item['state']})")
+            created = item.get('created_date', '')
+            date_part = f", Created: {created}" if created else ""
+            lines.append(f"  [{wi_type}] #{item['id']}: {item['title']} (State: {item['state']}{date_part})")
         return "\n".join(lines)
     return f"Unknown action: {action}. Use summary, count_by_field, or items_by_field."
