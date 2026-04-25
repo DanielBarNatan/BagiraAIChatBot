@@ -27,7 +27,7 @@ AZURE_DEVOPS_PROJECT = "AZURE_DEVOPS_PROJECT"
 AZURE_DEVOPS_WIKI_ID = "AZURE_DEVOPS_WIKI_ID"
 
 # --- Optional settings with defaults ---
-OPENAI_EMBEDDING_MODEL = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+OPENAI_EMBEDDING_MODEL = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-large")
 OPENAI_CHAT_MODEL = os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o")
 RETRIEVER_TOP_K = int(os.environ.get("RETRIEVER_TOP_K", "15"))
 SHOW_SOURCES = os.environ.get("SHOW_SOURCES", "1").strip().lower() in ("1", "true", "yes")
