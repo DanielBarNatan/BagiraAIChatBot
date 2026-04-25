@@ -45,18 +45,26 @@ TOOLS = [
                 "Use this for questions about counts, totals, breakdowns by state "
                 "(Done, Active, Removed, New, etc.), by work item type, by sprint/"
                 "iteration, by creation date, or questions about how many items "
-                "a specific person created or is assigned to."
+                "a specific person created or is assigned to. "
+                "Supports multi-field filtering via 'filter_items' and 'filter_count' "
+                "actions — use these when the question combines multiple criteria "
+                "(e.g. 'Bugs created by X that are Done')."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["summary", "count_by_field", "items_by_field"],
+                        "enum": ["summary", "count_by_field", "items_by_field",
+                                 "filter_items", "filter_count"],
                         "description": (
                             "summary: full overview of all work item stats. "
-                            "count_by_field: count work items grouped by a field. "
-                            "items_by_field: list work items matching a specific field value."
+                            "count_by_field: count work items grouped by a single field. "
+                            "items_by_field: list work items matching a single field value. "
+                            "filter_items: list work items matching multiple field-value "
+                            "filters simultaneously (AND logic). "
+                            "filter_count: count work items matching multiple filters, "
+                            "optionally grouped by a field via 'group_by'."
                         ),
                     },
                     "field": {
@@ -71,6 +79,51 @@ TOOLS = [
                             "Examples: a state like 'Done', a type like 'Bug', "
                             "an iteration like 'ProjectName\\Sprint 24', a person's name, "
                             "or a date/prefix like '2026', '2026-03', or '2026-03-15'."
+                        ),
+                    },
+                    "filters": {
+                        "type": "object",
+                        "description": (
+                            "Multi-field filter for filter_items / filter_count. "
+                            "Keys are field names (state, work_item_type, iteration, "
+                            "created_by, assigned_to, created_date), values are the "
+                            "values to match. All conditions are ANDed together. "
+                            "Example: {\"created_by\": \"Daniel\", \"state\": \"Done\", "
+                            "\"work_item_type\": \"Bug\"}"
+                        ),
+                        "additionalProperties": {"type": "string"},
+                    },
+                    "group_by": {
+                        "type": "string",
+                        "enum": ["state", "work_item_type", "iteration", "created_by", "assigned_to", "created_date"],
+                        "description": (
+                            "Optional. For filter_count only: group the filtered results "
+                            "by this field and return counts per group."
+                        ),
+                    },
+                    "sort_by": {
+                        "type": "string",
+                        "enum": ["created_date", "state", "work_item_type", "iteration", "title"],
+                        "description": (
+                            "Optional. Sort results by this field. Works with "
+                            "items_by_field and filter_items. "
+                            "Use 'created_date' to find the most recent or oldest items."
+                        ),
+                    },
+                    "sort_order": {
+                        "type": "string",
+                        "enum": ["asc", "desc"],
+                        "description": (
+                            "Optional. Sort direction: 'desc' (newest/largest first, default) "
+                            "or 'asc' (oldest/smallest first)."
+                        ),
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": (
+                            "Optional. Maximum number of items to return. "
+                            "Use with sort_by to get e.g. the 5 most recent items. "
+                            "0 or omitted means return all."
                         ),
                     },
                 },
@@ -114,6 +167,11 @@ def _execute_tool_call(name: str, arguments: dict) -> tuple[str, list[dict]]:
             action=arguments.get("action", "summary"),
             field=arguments.get("field", ""),
             value=arguments.get("value", ""),
+            filters=arguments.get("filters"),
+            group_by=arguments.get("group_by", ""),
+            sort_by=arguments.get("sort_by", ""),
+            sort_order=arguments.get("sort_order", "desc"),
+            limit=arguments.get("limit", 0),
         )
         return result, []
 
@@ -162,10 +220,23 @@ def answer(question: str, history: list[dict] | None = None) -> tuple[str, list[
                 "architecture, features, wiki content, or work item descriptions.\n\n"
 
                 "## Tool Selection Examples\n"
-                "- 'How many bugs are open?' → work_item_statistics (aggregate count)\n"
-                "- 'Show me all tasks assigned to Dan' → work_item_statistics (listing by person)\n"
-                "- 'How does the authentication system work?' → knowledge_search (architecture detail)\n"
-                "- 'What is the deployment process?' → knowledge_search (process documentation)\n"
+                "- 'How many bugs are open?' → work_item_statistics count_by_field\n"
+                "- 'Show me all tasks assigned to Dan' → work_item_statistics items_by_field\n"
+                "- 'How many Done bugs did Daniel create?' → work_item_statistics filter_count "
+                "with filters={\"created_by\": \"Daniel\", \"state\": \"Done\", \"work_item_type\": \"Bug\"}\n"
+                "- 'List Active PBIs assigned to Dan in Sprint 24' → work_item_statistics filter_items "
+                "with filters={\"assigned_to\": \"Dan\", \"state\": \"Active\", \"work_item_type\": \"Product Backlog Item\", "
+                "\"iteration\": \"Sprint 24\"}\n"
+                "- 'Break down Daniel's items by state' → work_item_statistics filter_count "
+                "with filters={\"created_by\": \"Daniel\"} and group_by=\"state\"\n"
+                "- 'What is the last item Daniel created?' → work_item_statistics items_by_field "
+                "with field=\"created_by\", value=\"Daniel\", sort_by=\"created_date\", "
+                "sort_order=\"desc\", limit=1\n"
+                "- 'Show me the 5 oldest open bugs' → work_item_statistics filter_items "
+                "with filters={\"state\": \"Active\", \"work_item_type\": \"Bug\"}, "
+                "sort_by=\"created_date\", sort_order=\"asc\", limit=5\n"
+                "- 'How does the authentication system work?' → knowledge_search\n"
+                "- 'What is the deployment process?' → knowledge_search\n"
                 "- 'How many PBIs were created last sprint and what do they cover?' → "
                 "call BOTH tools (statistics for count + knowledge_search for descriptions)\n\n"
 

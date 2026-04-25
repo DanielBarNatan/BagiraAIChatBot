@@ -55,6 +55,38 @@ def items_by_field(field: str, value: str) -> list[dict]:
     return [item for item in index if (item.get(field) or "").lower() == value_lower]
 
 
+def _item_matches_filters(item: dict, filters: dict[str, str]) -> bool:
+    """Check if a work item matches all filters (AND logic)."""
+    for field, value in filters.items():
+        item_val = item.get(field) or ""
+        if field == "created_date":
+            if not item_val.startswith(value):
+                return False
+        else:
+            if item_val.lower() != value.lower():
+                return False
+    return True
+
+
+def items_by_filters(filters: dict[str, str]) -> list[dict]:
+    """Return work items matching ALL the given field-value filters."""
+    index = load_index()
+    return [item for item in index if _item_matches_filters(item, filters)]
+
+
+def count_by_field_with_filters(group_by: str, filters: dict[str, str]) -> dict[str, int]:
+    """Count items grouped by *group_by*, after applying multi-field filters."""
+    filtered = items_by_filters(filters) if filters else load_index()
+    if group_by == "created_date":
+        counter = Counter(
+            (item.get("created_date") or "Unknown")[:7]
+            for item in filtered
+        )
+        return dict(sorted(counter.items()))
+    counter = Counter(item.get(group_by, "") or "Unknown" for item in filtered)
+    return dict(counter.most_common())
+
+
 def summary() -> str:
     """Human-readable summary of all work item statistics."""
     index = load_index()
@@ -90,10 +122,39 @@ def summary() -> str:
     return "\n".join(lines)
 
 
-def query(action: str, field: str = "", value: str = "") -> str:
+def _sort_and_limit(items: list[dict], sort_by: str = "",
+                    sort_order: str = "desc", limit: int = 0) -> list[dict]:
+    """Sort items by a field and optionally limit the result count."""
+    if sort_by:
+        reverse = sort_order.lower() != "asc"
+        items = sorted(items, key=lambda x: x.get(sort_by) or "", reverse=reverse)
+    if limit > 0:
+        items = items[:limit]
+    return items
+
+
+def _format_items(items: list[dict], filter_desc: str) -> str:
+    """Format a list of work items into a human-readable string."""
+    if not items:
+        return f"No work items found matching {filter_desc}."
+    lines = [f"Found {len(items)} work items matching {filter_desc}:"]
+    for item in items:
+        wi_type = item.get('work_item_type', 'PBI')
+        created = item.get('created_date', '')
+        date_part = f", Created: {created}" if created else ""
+        lines.append(f"  [{wi_type}] #{item['id']}: {item['title']} (State: {item['state']}{date_part})")
+    return "\n".join(lines)
+
+
+def query(action: str, field: str = "", value: str = "",
+          filters: dict[str, str] | None = None,
+          group_by: str = "", sort_by: str = "",
+          sort_order: str = "desc", limit: int = 0) -> str:
     """
     Single entry-point used by the chat engine tool-calling integration.
-    Actions: "summary", "count_by_field", "items_by_field".
+    Actions: "summary", "count_by_field", "items_by_field",
+             "filter_items", "filter_count".
+    sort_by, sort_order, and limit apply to items_by_field and filter_items.
     """
     if action == "summary":
         return summary()
@@ -107,13 +168,29 @@ def query(action: str, field: str = "", value: str = "") -> str:
         if not field or not value:
             return "Error: 'field' and 'value' are required."
         items = items_by_field(field, value)
-        if not items:
-            return f"No work items found where {field} = '{value}'."
-        lines = [f"Found {len(items)} work items where {field} = '{value}':"]
-        for item in items:
-            wi_type = item.get('work_item_type', 'PBI')
-            created = item.get('created_date', '')
-            date_part = f", Created: {created}" if created else ""
-            lines.append(f"  [{wi_type}] #{item['id']}: {item['title']} (State: {item['state']}{date_part})")
-        return "\n".join(lines)
-    return f"Unknown action: {action}. Use summary, count_by_field, or items_by_field."
+        items = _sort_and_limit(items, sort_by, sort_order, limit)
+        return _format_items(items, f"{field} = '{value}'")
+    if action == "filter_items":
+        if not filters:
+            return "Error: 'filters' dict is required for filter_items."
+        items = items_by_filters(filters)
+        items = _sort_and_limit(items, sort_by, sort_order, limit)
+        desc = ", ".join(f"{k} = '{v}'" for k, v in filters.items())
+        return _format_items(items, desc)
+    if action == "filter_count":
+        if not filters:
+            return "Error: 'filters' dict is required for filter_count."
+        gb = group_by or ""
+        if gb:
+            counts = count_by_field_with_filters(gb, filters)
+            desc = ", ".join(f"{k} = '{v}'" for k, v in filters.items())
+            lines = [f"Counts grouped by '{gb}' where {desc}:"]
+            total = sum(counts.values())
+            for k, v in counts.items():
+                lines.append(f"  {k}: {v}")
+            lines.append(f"  Total: {total}")
+            return "\n".join(lines)
+        items = items_by_filters(filters)
+        desc = ", ".join(f"{k} = '{v}'" for k, v in filters.items())
+        return f"Count of work items where {desc}: {len(items)}"
+    return f"Unknown action: {action}. Use summary, count_by_field, items_by_field, filter_items, or filter_count."
