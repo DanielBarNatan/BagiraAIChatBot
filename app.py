@@ -28,6 +28,7 @@ from config.settings import (
     AZURE_DEVOPS_PROJECT,
     AZURE_DEVOPS_WIKI_ID,
     get,
+    load_pipeline_status,
 )
 
 # ---------------------------------------------------------------------------
@@ -234,6 +235,35 @@ with st.sidebar:
     st.divider()
     st.header("Data Pipeline")
     st.caption("Fetch and index data from Azure DevOps.")
+
+    _ps = load_pipeline_status()
+    if _ps:
+        from datetime import datetime, timezone
+        def _fmt(entry: dict) -> str:
+            ts = entry.get("timestamp", "")
+            count = entry.get("count")
+            try:
+                dt = datetime.fromisoformat(ts).astimezone()
+                label = dt.strftime("%b %d, %Y at %H:%M")
+            except (ValueError, TypeError):
+                label = ts or "unknown"
+            if count is not None:
+                return f"{label}  ({count:,} items)"
+            return label
+
+        lines = []
+        if "fetch_work_items" in _ps:
+            lines.append(f"**Work Items:** {_fmt(_ps['fetch_work_items'])}")
+        if "fetch_wiki" in _ps:
+            lines.append(f"**Wiki:** {_fmt(_ps['fetch_wiki'])}")
+        if "generate_embeddings" in _ps:
+            lines.append(f"**Embeddings:** {_fmt(_ps['generate_embeddings'])}")
+        if lines:
+            st.markdown("##### Last Updated")
+            for ln in lines:
+                st.markdown(ln)
+    else:
+        st.info("No data fetched yet — run the pipeline.", icon="ℹ️")
 
     def _run_step(label: str, func, **kwargs):
         """Run a pipeline function with spinner and status feedback."""

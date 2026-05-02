@@ -134,10 +134,26 @@ def chunk_documents() -> int:
                 title = fm_meta.get("page_title") or path.stem
                 wiki_path = fm_meta.get("wiki_path", "")
                 work_item_id = title.replace("pbi_", "") if doc_type == "pbi" and title.lower().startswith("pbi_") else None
+                # Prepend wiki path/title (or PBI id/title) to chunk text so
+                # embeddings and search can match on page/item identity.
+                header_lines = []
+                if doc_type == "wiki":
+                    if wiki_path:
+                        header_lines.append(f"[Wiki path: {wiki_path}]")
+                    if title:
+                        header_lines.append(f"[Title: {title}]")
+                elif doc_type == "pbi":
+                    if work_item_id:
+                        header_lines.append(f"[PBI {work_item_id}: {title}]")
+                    elif title:
+                        header_lines.append(f"[Title: {title}]")
+                chunk_header = "\n".join(header_lines) + "\n\n" if header_lines else ""
+
                 chunks = _build_chunks(body if fm_meta else text)
                 for i, chunk_text in enumerate(chunks):
+                    text_with_header = chunk_header + chunk_text
                     meta = {
-                        "text": chunk_text,
+                        "text": text_with_header,
                         "source_document": path.name,
                         "document_type": doc_type,
                     }

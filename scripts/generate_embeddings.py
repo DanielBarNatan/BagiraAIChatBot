@@ -26,6 +26,7 @@ from config.settings import (
     get,
     ensure_dirs,
     validate,
+    update_pipeline_status,
 )
 
 # LlamaIndex/Chroma imports after path setup
@@ -112,6 +113,7 @@ def generate_embeddings() -> int:
         show_progress=True,
     )
     logger.info("Index persisted to %s", VECTOR_STORE_PATH)
+    update_pipeline_status("generate_embeddings", len(documents))
     return len(documents)
 
 

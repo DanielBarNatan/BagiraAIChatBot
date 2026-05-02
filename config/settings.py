@@ -29,7 +29,7 @@ AZURE_DEVOPS_WIKI_ID = "AZURE_DEVOPS_WIKI_ID"
 # --- Optional settings with defaults ---
 OPENAI_EMBEDDING_MODEL = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-large")
 OPENAI_CHAT_MODEL = os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o")
-RETRIEVER_TOP_K = int(os.environ.get("RETRIEVER_TOP_K", "15"))
+RETRIEVER_TOP_K = int(os.environ.get("RETRIEVER_TOP_K", "5"))
 SHOW_SOURCES = os.environ.get("SHOW_SOURCES", "1").strip().lower() in ("1", "true", "yes")
 
 
@@ -71,3 +71,41 @@ def ensure_dirs() -> None:
         VECTOR_STORE_PATH,
     ):
         path.mkdir(parents=True, exist_ok=True)
+
+
+# --- Pipeline status tracking ---
+PIPELINE_STATUS_PATH = PROJECT_ROOT / "data" / "pipeline_status.json"
+
+
+def update_pipeline_status(step: str, count: int) -> None:
+    """Record when a pipeline step last ran and how many items it produced."""
+    import json
+    from datetime import datetime, timezone
+
+    status: dict = {}
+    if PIPELINE_STATUS_PATH.exists():
+        try:
+            status = json.loads(PIPELINE_STATUS_PATH.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            status = {}
+
+    status[step] = {
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "count": count,
+    }
+    PIPELINE_STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    PIPELINE_STATUS_PATH.write_text(
+        json.dumps(status, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+def load_pipeline_status() -> dict:
+    """Return the saved pipeline status dict, or empty dict if unavailable."""
+    import json
+
+    if not PIPELINE_STATUS_PATH.exists():
+        return {}
+    try:
+        return json.loads(PIPELINE_STATUS_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}

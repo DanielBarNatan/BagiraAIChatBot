@@ -28,6 +28,7 @@ from config.settings import (
     get,
     ensure_dirs,
     validate,
+    update_pipeline_status,
 )
 
 import logging
@@ -236,6 +237,7 @@ def fetch_work_items() -> int:
     index_path = DATA_RAW_PBI / "pbi_index.json"
     index_path.write_text(json.dumps(index_entries, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info("Saved %s work item files + pbi_index.json to %s", saved, DATA_RAW_PBI)
+    update_pipeline_status("fetch_work_items", saved)
     return saved
 
 

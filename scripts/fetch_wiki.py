@@ -35,6 +35,7 @@ from config.settings import (
     get,
     ensure_dirs,
     validate,
+    update_pipeline_status,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -211,6 +212,7 @@ def fetch_wiki() -> int:
         saved += 1
         logger.info("Saved: %s -> %s", wiki_path, out_path.name)
     logger.info("Done. Saved %s wiki pages to %s", saved, DATA_RAW_WIKI)
+    update_pipeline_status("fetch_wiki", saved)
     return saved
 
 

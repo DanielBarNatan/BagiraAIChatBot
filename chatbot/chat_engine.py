@@ -2,6 +2,7 @@
 Orchestrates retrieval, prompt building, and LLM call to produce a grounded answer.
 Supports both RAG-based knowledge search and structured PBI statistics via tool calling.
 """
+import datetime
 import json
 from pathlib import Path
 import sys
@@ -205,6 +206,7 @@ def answer(question: str, history: list[dict] | None = None) -> tuple[str, list[
         {
             "role": "system",
             "content": (
+                f"Today's date is {datetime.date.today().isoformat()}.\n\n"
                 "You are a senior DevOps AI Knowledge Assistant embedded in a development "
                 "team's workflow. You have deep expertise in CI/CD pipelines, cloud "
                 "infrastructure, system architecture, and Azure DevOps practices. Your "
