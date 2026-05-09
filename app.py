@@ -223,6 +223,16 @@ st.markdown("""
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+if "retriever_ready" not in st.session_state:
+    with st.spinner("Loading knowledge base..."):
+        try:
+            from chatbot.retriever import warmup
+            warmup()
+            st.session_state.retriever_ready = True
+        except Exception as e:
+            st.warning(f"Warmup skipped: {e}")
+            st.session_state.retriever_ready = True
+
 # ---------------------------------------------------------------------------
 # Sidebar — data pipeline controls
 # ---------------------------------------------------------------------------
@@ -351,22 +361,35 @@ if question := st.chat_input("Ask a question... | ...שאל שאלה"):
         st.markdown(question)
 
     with st.chat_message("assistant", avatar=BOT_AVATAR):
-        with st.spinner("Thinking..."):
-            try:
-                from chatbot.chat_engine import answer
-                reply, sources = answer(question, history=st.session_state.messages)
-            except FileNotFoundError as exc:
-                reply = (
-                    f"**Setup required:** {exc}\n\n"
-                    "Use the sidebar to run the pipeline, or run:\n"
-                    "```\npython scripts/generate_embeddings.py\n```"
-                )
-                sources = []
-            except Exception as exc:
-                reply = f"**Error:** {exc}"
-                sources = []
+        try:
+            from chatbot.chat_engine import answer_stream
 
-        st.markdown(reply)
+            def _token_generator():
+                """Yield only text tokens for st.write_stream; capture sources."""
+                for token, src in answer_stream(question, history=st.session_state.messages):
+                    if src is not None:
+                        st.session_state._pending_sources = src
+                    else:
+                        yield token
+
+            st.session_state._pending_sources = []
+            reply = st.write_stream(_token_generator())
+            sources = st.session_state._pending_sources
+            del st.session_state._pending_sources
+
+        except FileNotFoundError as exc:
+            reply = (
+                f"**Setup required:** {exc}\n\n"
+                "Use the sidebar to run the pipeline, or run:\n"
+                "```\npython scripts/generate_embeddings.py\n```"
+            )
+            sources = []
+            st.markdown(reply)
+        except Exception as exc:
+            reply = f"**Error:** {exc}"
+            sources = []
+            st.markdown(reply)
+
         if SHOW_SOURCES:
             _render_sources(sources)
 

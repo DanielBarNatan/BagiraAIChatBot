@@ -17,10 +17,10 @@ from chatbot.prompt_builder import build_prompt, build_stats_context
 
 
 def _get_llm():
-    from config.settings import OPENAI_API_KEY, OPENAI_CHAT_MODEL, get
+    from config.settings import OPENAI_API_KEY, OPENAI_CHAT_MODEL, OPENAI_FAST_MODEL, get
     from openai import OpenAI
     client = OpenAI(api_key=get(OPENAI_API_KEY))
-    return client, OPENAI_CHAT_MODEL
+    return client, OPENAI_CHAT_MODEL, OPENAI_FAST_MODEL
 
 
 def _deduplicate_sources(chunks: list[tuple[str, dict]]) -> list[dict]:
@@ -210,106 +210,51 @@ def _execute_tool_call(name: str, arguments: dict) -> tuple[str, list[dict]]:
 MAX_HISTORY_PAIRS = 5
 
 
-def answer(question: str, history: list[dict] | None = None) -> tuple[str, list[dict]]:
-    """
-    Answer a user question using tool calling. The LLM decides whether to use
-    RAG knowledge search, PBI statistics, or both.
-    Accepts optional conversation history (list of {"role", "content"} dicts)
-    to support follow-up questions. Only the last MAX_HISTORY_PAIRS exchanges
-    are included to control token usage.
-    Returns (reply_text, deduplicated_sources).
-    """
-    client, model = _get_llm()
-
+def _build_system_messages(history: list[dict] | None, question: str) -> list[dict]:
+    """Build the messages list with system prompt, history, and user question."""
     messages = [
         {
             "role": "system",
             "content": (
                 f"Today's date is {datetime.date.today().isoformat()}.\n\n"
-                "You are a senior DevOps AI Knowledge Assistant embedded in a development "
-                "team's workflow. You have deep expertise in CI/CD pipelines, cloud "
-                "infrastructure, system architecture, and Azure DevOps practices. Your "
-                "goal is to provide thorough, accurate, well-reasoned answers grounded "
-                "in the team's own documentation and work item data.\n\n"
+                "You are a DevOps AI Knowledge Assistant. Provide thorough, accurate answers "
+                "grounded in the team's documentation and work item data.\n\n"
 
                 "## Tools\n"
-                "You have two tools:\n"
-                "1. **work_item_statistics** — for aggregate/statistical questions about "
-                "work items (PBIs, Bugs, Tasks). Supports counts by state, by type, "
-                "by sprint/iteration, by person, by creation date, and listing items.\n"
-                "2. **knowledge_search** — for detailed knowledge questions about system "
-                "architecture, features, wiki content, or work item descriptions.\n\n"
+                "1. **work_item_statistics** — counts, listings, and breakdowns of PBIs/Bugs/Tasks.\n"
+                "2. **knowledge_search** — wiki pages, system architecture, feature docs.\n\n"
 
-                "## Tool Selection Examples\n"
-                "- 'How many bugs are open?' → work_item_statistics count_by_field\n"
-                "- 'Show me all tasks assigned to Dan' → work_item_statistics items_by_field\n"
-                "- 'How many Done bugs did Daniel create?' → work_item_statistics filter_count "
-                "with filters={\"created_by\": \"Daniel\", \"state\": \"Done\", \"work_item_type\": \"Bug\"}\n"
-                "- 'List Active PBIs assigned to Dan in Sprint 24' → work_item_statistics filter_items "
-                "with filters={\"assigned_to\": \"Dan\", \"state\": \"Active\", \"work_item_type\": \"Product Backlog Item\", "
-                "\"iteration\": \"Sprint 24\"}\n"
-                "- 'Break down Daniel's items by state' → work_item_statistics filter_count "
-                "with filters={\"created_by\": \"Daniel\"} and group_by=\"state\"\n"
-                "- 'What is the last item Daniel created?' → work_item_statistics items_by_field "
-                "with field=\"created_by\", value=\"Daniel\", sort_by=\"created_date\", "
-                "sort_order=\"desc\", limit=1\n"
-                "- 'Show me the 5 oldest open bugs' → work_item_statistics filter_items "
-                "with filters={\"state\": \"Active\", \"work_item_type\": \"Bug\"}, "
-                "sort_by=\"created_date\", sort_order=\"asc\", limit=5\n"
-                "- 'What did Daniel create last week?' → work_item_statistics filter_items "
-                "with filters={\"created_by\": \"Daniel\"}, date_from=\"YYYY-MM-DD\" (7 days ago), "
-                "date_to=\"YYYY-MM-DD\" (today). ALWAYS compute exact YYYY-MM-DD dates from "
-                "today's date for relative terms like 'last week', 'last 2 weeks', 'this month'.\n"
-                "- 'What items did Daniel create in the last month?' → work_item_statistics "
-                "filter_items with filters={\"created_by\": \"Daniel\"}, "
-                "date_from=\"YYYY-MM-DD\" (30 days ago), date_to=\"YYYY-MM-DD\" (today). "
-                "Use filter_items (NOT filter_count) because the user wants to SEE the items.\n"
-                "- 'How many bugs were created in the last 2 weeks?' → work_item_statistics filter_count "
-                "with filters={\"work_item_type\": \"Bug\"}, date_from=\"YYYY-MM-DD\" (14 days ago), "
-                "date_to=\"YYYY-MM-DD\" (today)\n"
-                "- 'How does the authentication system work?' → knowledge_search\n"
-                "- 'What is the deployment process?' → knowledge_search\n"
-                "- 'How many PBIs were created last sprint and what do they cover?' → "
-                "call BOTH tools (statistics for count + knowledge_search for descriptions)\n\n"
-
-                "## Reasoning\n"
-                "Before answering, think step by step:\n"
-                "1. Identify what the user is really asking (resolve pronouns using conversation history).\n"
-                "2. Decide which tool(s) to call and what query to use.\n"
-                "3. After receiving tool results, reason through the context carefully — "
-                "look for connections, caveats, and nuances before composing your answer.\n"
-                "4. If the context is insufficient, say so honestly rather than guessing.\n\n"
+                "## Examples\n"
+                "- 'How many bugs are open?' → count_by_field, field=state\n"
+                "- 'How many items did Daniel create?' → filter_count, "
+                "filters={\"created_by\":\"Daniel\"}, group_by=work_item_type\n"
+                "- 'Done bugs Daniel created' → filter_count, "
+                "filters={\"created_by\":\"Daniel\",\"state\":\"Done\",\"work_item_type\":\"Bug\"}\n"
+                "- 'Break down Daniel's items by state' → filter_count, "
+                "filters={\"created_by\":\"Daniel\"}, group_by=state\n"
+                "- 'What items did Daniel create last month?' → filter_items, "
+                "filters={\"created_by\":\"Daniel\"}, date_from/date_to as YYYY-MM-DD. "
+                "ALWAYS compute exact dates from today. Use filter_items when the user "
+                "wants to SEE items; filter_count only for 'how many'.\n"
+                "- 'Last item Daniel created' → items_by_field, field=created_by, "
+                "value=Daniel, sort_by=created_date, sort_order=desc, limit=1\n"
+                "- 'How does authentication work?' → knowledge_search\n"
+                "- Both stats + details needed → call BOTH tools\n"
+                "IMPORTANT: When a question mentions a specific person, ALWAYS use "
+                "filter_count or filter_items with filters={\"created_by\":\"Name\"} — "
+                "NEVER use count_by_field, which counts ALL items ignoring the person.\n\n"
 
                 "## Rules\n"
-                "- NEVER say you will look something up or promise to check. Always call "
-                "the appropriate tool immediately.\n"
-                "- You may call both tools if the question needs both statistics and "
-                "detailed information.\n"
-                "- IMPORTANT: When the user asks 'what items', 'show items', 'list items', "
-                "or any question that expects to SEE the actual work items, ALWAYS use the "
-                "'filter_items' action (NOT 'filter_count'). Only use 'filter_count' when "
-                "the user explicitly asks 'how many' and does NOT want to see the items.\n"
-                "- Provide structured, clear answers. Use bullet points or numbered lists "
-                "when presenting multiple items.\n"
-                "- When presenting work items from tool results, follow this display rule:\n"
-                "  * If a work item type has 5 or fewer items: list ALL of them with full "
-                "details (ID, title, state, created date).\n"
-                "  * If a work item type has more than 5 items: show the total count for "
-                "that type, then list 3 representative examples with full details, and note "
-                "how many more exist.\n"
-                "  * Group the output by work item type (Bugs, Tasks, PBIs) with clear headings.\n"
-                "  * NEVER silently drop items — always show either the full list or the "
-                "count + examples.\n"
-                "- When citing information, mention the source document or wiki page.\n"
-                "- You have access to recent conversation history for context — use it to "
-                "understand follow-up questions.\n\n"
+                "- Call tools immediately; never promise to look something up.\n"
+                "- When user asks to see/list/show items, use filter_items (NOT filter_count).\n"
+                "- Display rule for work items: <=5 per type → list all with ID, title, state, "
+                "date. >5 per type → show count + 3 examples. Group by type. Never drop items.\n"
+                "- Cite source documents/wiki pages. Use conversation history for follow-ups.\n"
+                "- If context is insufficient, say so honestly.\n\n"
 
                 "## Language\n"
-                "Always reply in the same language the user writes in. "
-                "If the user writes in Hebrew, respond in Hebrew. "
-                "If the user writes in English, respond in English. "
-                "Keep technical terms, work item titles, and field names in their "
-                "original language."
+                "Reply in the user's language. Keep technical terms and titles in "
+                "their original language."
             ),
         },
     ]
@@ -320,9 +265,24 @@ def answer(question: str, history: list[dict] | None = None) -> tuple[str, list[
             messages.append({"role": msg["role"], "content": msg["content"]})
 
     messages.append({"role": "user", "content": question})
+    return messages
+
+
+def answer(question: str, history: list[dict] | None = None) -> tuple[str, list[dict]]:
+    """
+    Answer a user question using tool calling. The LLM decides whether to use
+    RAG knowledge search, PBI statistics, or both.
+    Accepts optional conversation history (list of {"role", "content"} dicts)
+    to support follow-up questions. Only the last MAX_HISTORY_PAIRS exchanges
+    are included to control token usage.
+    Returns (reply_text, deduplicated_sources).
+    """
+    client, model, fast_model = _get_llm()
+
+    messages = _build_system_messages(history, question)
 
     response = client.chat.completions.create(
-        model=model,
+        model=fast_model,
         messages=messages,
         tools=TOOLS,
         temperature=0,
@@ -331,7 +291,14 @@ def answer(question: str, history: list[dict] | None = None) -> tuple[str, list[
     all_sources: list[dict] = []
 
     if not message.tool_calls:
-        reply = (message.content or "").strip()
+        # No tool call — fast model answered directly; re-ask with full model
+        # for higher-quality direct answers.
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0,
+        )
+        reply = (response.choices[0].message.content or "").strip()
         return reply if reply else "I'm not sure how to answer that.", all_sources
 
     messages.append(message)
@@ -356,3 +323,65 @@ def answer(question: str, history: list[dict] | None = None) -> tuple[str, list[
     )
     reply = (final_response.choices[0].message.content or "").strip()
     return reply, all_sources
+
+
+def answer_stream(question: str, history: list[dict] | None = None):
+    """
+    Streaming variant of answer(). Yields (chunk_text, None) for each token,
+    then yields ("", sources) as the final item with the deduplicated sources.
+    The tool-decision and retrieval steps run non-streaming (fast);
+    only the final answer generation is streamed.
+    """
+    client, model, fast_model = _get_llm()
+
+    messages = _build_system_messages(history, question)
+
+    response = client.chat.completions.create(
+        model=fast_model,
+        messages=messages,
+        tools=TOOLS,
+        temperature=0,
+    )
+    message = response.choices[0].message
+    all_sources: list[dict] = []
+
+    if not message.tool_calls:
+        stream = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0,
+            stream=True,
+        )
+        for chunk in stream:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta and delta.content:
+                yield delta.content, None
+        yield "", all_sources
+        return
+
+    messages.append(message)
+
+    for tool_call in message.tool_calls:
+        try:
+            args = json.loads(tool_call.function.arguments)
+        except json.JSONDecodeError:
+            args = {}
+        result_text, sources = _execute_tool_call(tool_call.function.name, args)
+        all_sources.extend(sources)
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call.id,
+            "content": result_text,
+        })
+
+    stream = client.chat.completions.create(
+        model=model,
+        messages=messages,
+        temperature=0,
+        stream=True,
+    )
+    for chunk in stream:
+        delta = chunk.choices[0].delta if chunk.choices else None
+        if delta and delta.content:
+            yield delta.content, None
+    yield "", all_sources

@@ -44,6 +44,7 @@ RERANK_CANDIDATE_MULTIPLIER = 4
 BM25_ENABLED = os.environ.get("BM25_ENABLED", "1").strip().lower() in ("1", "true", "yes")
 
 _cross_encoder = None
+_cached_index: VectorStoreIndex | None = None
 _bm25_index: BM25Okapi | None = None
 _bm25_chunks: list[tuple[str, dict]] | None = None
 
@@ -120,7 +121,10 @@ def _rerank(query: str, chunks: list[tuple[str, dict]], top_k: int) -> list[tupl
 
 
 def _get_index():
-    """Load or create VectorStoreIndex from persisted Chroma. Raises if DB missing."""
+    """Load VectorStoreIndex from persisted Chroma. Cached after first call."""
+    global _cached_index
+    if _cached_index is not None:
+        return _cached_index
     if not VECTOR_STORE_PATH.exists():
         raise FileNotFoundError(
             f"Vector store not found at {VECTOR_STORE_PATH}. "
@@ -139,11 +143,12 @@ def _get_index():
         model=OPENAI_EMBEDDING_MODEL,
         api_key=get(OPENAI_API_KEY),
     )
-    index = VectorStoreIndex.from_vector_store(
+    _cached_index = VectorStoreIndex.from_vector_store(
         vector_store,
         embed_model=embed_model,
     )
-    return index
+    logger.info("Chroma index loaded and cached")
+    return _cached_index
 
 
 def _merge_chunks(
@@ -199,3 +204,24 @@ def retrieve(query: str, top_k: int | None = None) -> list[tuple[str, dict]]:
         combined = _rerank(query, combined, top_k)
 
     return combined
+
+
+def warmup() -> None:
+    """Pre-load all heavy resources so the first query is fast.
+    Call once at application startup."""
+    logger.info("Warming up retriever...")
+    try:
+        _get_index()
+    except FileNotFoundError as e:
+        logger.warning("Chroma warmup skipped: %s", e)
+    if BM25_ENABLED:
+        try:
+            _load_bm25_index()
+        except FileNotFoundError as e:
+            logger.warning("BM25 warmup skipped: %s", e)
+    if RERANK_ENABLED:
+        try:
+            _get_cross_encoder()
+        except Exception as e:
+            logger.warning("Reranker warmup skipped: %s", e)
+    logger.info("Warmup complete")

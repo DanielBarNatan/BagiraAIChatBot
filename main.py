@@ -32,14 +32,18 @@ def main():
         sys.exit(1)
 
     print("DevOps AI Knowledge Assistant")
-    print("Ask questions about your system (Wiki + PBI). Type 'quit' or press Enter to exit.\n")
+    print("Loading knowledge base...", flush=True)
 
     try:
-        from chatbot.chat_engine import answer
+        from chatbot.chat_engine import answer_stream
+        from chatbot.retriever import warmup
+        warmup()
     except FileNotFoundError as e:
         print(f"Setup required: {e}")
         print("Run: python scripts/generate_embeddings.py")
         sys.exit(1)
+
+    print("Ready! Ask questions about your system (Wiki + PBI). Type 'quit' or press Enter to exit.\n")
 
     history: list[dict] = []
 
@@ -51,12 +55,21 @@ def main():
         if not user_input or user_input.lower() == "quit":
             print("Goodbye.")
             break
-        print("Searching...")
+        print("Searching...", flush=True)
         try:
-            reply, sources = answer(user_input, history=history)
+            print("Assistant: ", end="", flush=True)
+            full_reply = []
+            sources = []
+            for token, src in answer_stream(user_input, history=history):
+                if src is not None:
+                    sources = src
+                else:
+                    print(token, end="", flush=True)
+                    full_reply.append(token)
+            reply = "".join(full_reply)
+            print("\n")
             history.append({"role": "user", "content": user_input})
             history.append({"role": "assistant", "content": reply})
-            print(f"Assistant: {reply}\n")
             if SHOW_SOURCES and sources:
                 org = get(AZURE_DEVOPS_ORG)
                 project = get(AZURE_DEVOPS_PROJECT)
