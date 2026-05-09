@@ -4,7 +4,7 @@ Provides aggregate queries (counts by state, type, iteration, person, date) that
 """
 import json
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from pathlib import Path
 
 from config.settings import DATA_RAW_PBI
@@ -45,6 +45,35 @@ def count_by_field(field: str) -> dict[str, int]:
     return dict(counter.most_common())
 
 
+def _parse_date(s: str) -> date | None:
+    """Parse a YYYY-MM-DD (or longer ISO) string into a date object."""
+    try:
+        return datetime.fromisoformat(s[:10]).date()
+    except (ValueError, TypeError):
+        return None
+
+
+def _filter_by_date_range(
+    items: list[dict], date_from: str = "", date_to: str = ""
+) -> list[dict]:
+    """Filter items whose created_date falls within [date_from, date_to] inclusive."""
+    d_from = _parse_date(date_from) if date_from else None
+    d_to = _parse_date(date_to) if date_to else None
+    if not d_from and not d_to:
+        return items
+    result = []
+    for item in items:
+        d = _parse_date(item.get("created_date") or "")
+        if d is None:
+            continue
+        if d_from and d < d_from:
+            continue
+        if d_to and d > d_to:
+            continue
+        result.append(item)
+    return result
+
+
 def items_by_field(field: str, value: str) -> list[dict]:
     """Return PBI items where *field* matches *value* (case-insensitive).
     For created_date, supports prefix matching (e.g. '2026', '2026-03', '2026-03-15')."""
@@ -56,8 +85,11 @@ def items_by_field(field: str, value: str) -> list[dict]:
 
 
 def _item_matches_filters(item: dict, filters: dict[str, str]) -> bool:
-    """Check if a work item matches all filters (AND logic)."""
+    """Check if a work item matches all filters (AND logic).
+    Skips date_from/date_to keys (handled separately by _filter_by_date_range)."""
     for field, value in filters.items():
+        if field in ("date_from", "date_to"):
+            continue
         item_val = item.get(field) or ""
         if field == "created_date":
             if not item_val.startswith(value):
@@ -68,15 +100,30 @@ def _item_matches_filters(item: dict, filters: dict[str, str]) -> bool:
     return True
 
 
-def items_by_filters(filters: dict[str, str]) -> list[dict]:
-    """Return work items matching ALL the given field-value filters."""
+def items_by_filters(
+    filters: dict[str, str],
+    date_from: str = "",
+    date_to: str = "",
+) -> list[dict]:
+    """Return work items matching ALL the given field-value filters.
+    Also applies date_from/date_to range if provided (either as params or inside filters)."""
+    df = date_from or filters.get("date_from", "")
+    dt = date_to or filters.get("date_to", "")
     index = load_index()
-    return [item for item in index if _item_matches_filters(item, filters)]
+    items = [item for item in index if _item_matches_filters(item, filters)]
+    if df or dt:
+        items = _filter_by_date_range(items, df, dt)
+    return items
 
 
-def count_by_field_with_filters(group_by: str, filters: dict[str, str]) -> dict[str, int]:
-    """Count items grouped by *group_by*, after applying multi-field filters."""
-    filtered = items_by_filters(filters) if filters else load_index()
+def count_by_field_with_filters(
+    group_by: str, filters: dict[str, str],
+    date_from: str = "", date_to: str = "",
+) -> dict[str, int]:
+    """Count items grouped by *group_by*, after applying multi-field filters + date range."""
+    filtered = items_by_filters(filters, date_from, date_to) if filters else load_index()
+    if not filters and (date_from or date_to):
+        filtered = _filter_by_date_range(filtered, date_from, date_to)
     if group_by == "created_date":
         counter = Counter(
             (item.get("created_date") or "Unknown")[:7]
@@ -149,12 +196,14 @@ def _format_items(items: list[dict], filter_desc: str) -> str:
 def query(action: str, field: str = "", value: str = "",
           filters: dict[str, str] | None = None,
           group_by: str = "", sort_by: str = "",
-          sort_order: str = "desc", limit: int = 0) -> str:
+          sort_order: str = "desc", limit: int = 0,
+          date_from: str = "", date_to: str = "") -> str:
     """
     Single entry-point used by the chat engine tool-calling integration.
     Actions: "summary", "count_by_field", "items_by_field",
              "filter_items", "filter_count".
     sort_by, sort_order, and limit apply to items_by_field and filter_items.
+    date_from / date_to (YYYY-MM-DD) filter created_date to a range.
     """
     if action == "summary":
         return summary()
@@ -168,29 +217,43 @@ def query(action: str, field: str = "", value: str = "",
         if not field or not value:
             return "Error: 'field' and 'value' are required."
         items = items_by_field(field, value)
+        if date_from or date_to:
+            items = _filter_by_date_range(items, date_from, date_to)
         items = _sort_and_limit(items, sort_by, sort_order, limit)
-        return _format_items(items, f"{field} = '{value}'")
+        desc = f"{field} = '{value}'"
+        if date_from or date_to:
+            desc += f" (date range: {date_from or '...'} to {date_to or '...'})"
+        return _format_items(items, desc)
     if action == "filter_items":
-        if not filters:
-            return "Error: 'filters' dict is required for filter_items."
-        items = items_by_filters(filters)
+        if not filters and not date_from and not date_to:
+            return "Error: 'filters' dict or date_from/date_to is required for filter_items."
+        items = items_by_filters(filters or {}, date_from, date_to)
         items = _sort_and_limit(items, sort_by, sort_order, limit)
-        desc = ", ".join(f"{k} = '{v}'" for k, v in filters.items())
+        parts = [f"{k} = '{v}'" for k, v in (filters or {}).items() if k not in ("date_from", "date_to")]
+        if date_from or date_to:
+            parts.append(f"date range: {date_from or '...'} to {date_to or '...'}")
+        desc = ", ".join(parts) if parts else "all items"
         return _format_items(items, desc)
     if action == "filter_count":
-        if not filters:
-            return "Error: 'filters' dict is required for filter_count."
+        if not filters and not date_from and not date_to:
+            return "Error: 'filters' dict or date_from/date_to is required for filter_count."
         gb = group_by or ""
         if gb:
-            counts = count_by_field_with_filters(gb, filters)
-            desc = ", ".join(f"{k} = '{v}'" for k, v in filters.items())
+            counts = count_by_field_with_filters(gb, filters or {}, date_from, date_to)
+            parts = [f"{k} = '{v}'" for k, v in (filters or {}).items() if k not in ("date_from", "date_to")]
+            if date_from or date_to:
+                parts.append(f"date range: {date_from or '...'} to {date_to or '...'}")
+            desc = ", ".join(parts) if parts else "all items"
             lines = [f"Counts grouped by '{gb}' where {desc}:"]
             total = sum(counts.values())
             for k, v in counts.items():
                 lines.append(f"  {k}: {v}")
             lines.append(f"  Total: {total}")
             return "\n".join(lines)
-        items = items_by_filters(filters)
-        desc = ", ".join(f"{k} = '{v}'" for k, v in filters.items())
+        items = items_by_filters(filters or {}, date_from, date_to)
+        parts = [f"{k} = '{v}'" for k, v in (filters or {}).items() if k not in ("date_from", "date_to")]
+        if date_from or date_to:
+            parts.append(f"date range: {date_from or '...'} to {date_to or '...'}")
+        desc = ", ".join(parts) if parts else "all items"
         return f"Count of work items where {desc}: {len(items)}"
     return f"Unknown action: {action}. Use summary, count_by_field, items_by_field, filter_items, or filter_count."

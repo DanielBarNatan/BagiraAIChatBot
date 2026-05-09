@@ -127,6 +127,23 @@ TOOLS = [
                             "0 or omitted means return all."
                         ),
                     },
+                    "date_from": {
+                        "type": "string",
+                        "description": (
+                            "Optional. Start of date range (YYYY-MM-DD, inclusive). "
+                            "Filters work items whose created_date >= this date. "
+                            "Use for questions like 'last week', 'last 2 weeks', 'since March'. "
+                            "Today's date is available in the system message."
+                        ),
+                    },
+                    "date_to": {
+                        "type": "string",
+                        "description": (
+                            "Optional. End of date range (YYYY-MM-DD, inclusive). "
+                            "Filters work items whose created_date <= this date. "
+                            "Defaults to today if omitted and date_from is set."
+                        ),
+                    },
                 },
                 "required": ["action"],
             },
@@ -170,6 +187,8 @@ def _execute_tool_call(name: str, arguments: dict) -> tuple[str, list[dict]]:
             value=arguments.get("value", ""),
             filters=arguments.get("filters"),
             group_by=arguments.get("group_by", ""),
+            date_from=arguments.get("date_from", ""),
+            date_to=arguments.get("date_to", ""),
             sort_by=arguments.get("sort_by", ""),
             sort_order=arguments.get("sort_order", "desc"),
             limit=arguments.get("limit", 0),
@@ -237,6 +256,17 @@ def answer(question: str, history: list[dict] | None = None) -> tuple[str, list[
                 "- 'Show me the 5 oldest open bugs' → work_item_statistics filter_items "
                 "with filters={\"state\": \"Active\", \"work_item_type\": \"Bug\"}, "
                 "sort_by=\"created_date\", sort_order=\"asc\", limit=5\n"
+                "- 'What did Daniel create last week?' → work_item_statistics filter_items "
+                "with filters={\"created_by\": \"Daniel\"}, date_from=\"YYYY-MM-DD\" (7 days ago), "
+                "date_to=\"YYYY-MM-DD\" (today). ALWAYS compute exact YYYY-MM-DD dates from "
+                "today's date for relative terms like 'last week', 'last 2 weeks', 'this month'.\n"
+                "- 'What items did Daniel create in the last month?' → work_item_statistics "
+                "filter_items with filters={\"created_by\": \"Daniel\"}, "
+                "date_from=\"YYYY-MM-DD\" (30 days ago), date_to=\"YYYY-MM-DD\" (today). "
+                "Use filter_items (NOT filter_count) because the user wants to SEE the items.\n"
+                "- 'How many bugs were created in the last 2 weeks?' → work_item_statistics filter_count "
+                "with filters={\"work_item_type\": \"Bug\"}, date_from=\"YYYY-MM-DD\" (14 days ago), "
+                "date_to=\"YYYY-MM-DD\" (today)\n"
                 "- 'How does the authentication system work?' → knowledge_search\n"
                 "- 'What is the deployment process?' → knowledge_search\n"
                 "- 'How many PBIs were created last sprint and what do they cover?' → "
@@ -255,8 +285,21 @@ def answer(question: str, history: list[dict] | None = None) -> tuple[str, list[
                 "the appropriate tool immediately.\n"
                 "- You may call both tools if the question needs both statistics and "
                 "detailed information.\n"
+                "- IMPORTANT: When the user asks 'what items', 'show items', 'list items', "
+                "or any question that expects to SEE the actual work items, ALWAYS use the "
+                "'filter_items' action (NOT 'filter_count'). Only use 'filter_count' when "
+                "the user explicitly asks 'how many' and does NOT want to see the items.\n"
                 "- Provide structured, clear answers. Use bullet points or numbered lists "
                 "when presenting multiple items.\n"
+                "- When presenting work items from tool results, follow this display rule:\n"
+                "  * If a work item type has 5 or fewer items: list ALL of them with full "
+                "details (ID, title, state, created date).\n"
+                "  * If a work item type has more than 5 items: show the total count for "
+                "that type, then list 3 representative examples with full details, and note "
+                "how many more exist.\n"
+                "  * Group the output by work item type (Bugs, Tasks, PBIs) with clear headings.\n"
+                "  * NEVER silently drop items — always show either the full list or the "
+                "count + examples.\n"
                 "- When citing information, mention the source document or wiki page.\n"
                 "- You have access to recent conversation history for context — use it to "
                 "understand follow-up questions.\n\n"
