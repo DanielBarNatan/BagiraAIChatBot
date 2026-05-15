@@ -2,5 +2,9 @@
   "generate_embeddings": {
     "timestamp": "2026-05-01T23:44:15+00:00",
     "count": 76806
+  },
+  "fetch_wiki": {
+    "timestamp": "2026-05-12T11:00:30+00:00",
+    "count": 57
   }
 }

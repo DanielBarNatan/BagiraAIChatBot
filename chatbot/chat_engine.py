@@ -245,11 +245,14 @@ def _build_system_messages(history: list[dict] | None, question: str) -> list[di
                 "NEVER use count_by_field, which counts ALL items ignoring the person.\n\n"
 
                 "## Rules\n"
-                "- Call tools immediately; never promise to look something up.\n"
+                "- ALWAYS call a tool for EVERY question about work items — even follow-ups. "
+                "NEVER answer with work item IDs, titles, or details from memory or conversation "
+                "history. If you don't call a tool, you don't have the data.\n"
                 "- When user asks to see/list/show items, use filter_items (NOT filter_count).\n"
                 "- Display rule for work items: <=5 per type → list all with ID, title, state, "
                 "date. >5 per type → show count + 3 examples. Group by type. Never drop items.\n"
-                "- Cite source documents/wiki pages. Use conversation history for follow-ups.\n"
+                "- Cite source documents/wiki pages. Use conversation history to understand "
+                "what the user is referring to, but ALWAYS call a tool to get fresh data.\n"
                 "- If context is insufficient, say so honestly.\n\n"
 
                 "## Language\n"
@@ -277,12 +280,12 @@ def answer(question: str, history: list[dict] | None = None) -> tuple[str, list[
     are included to control token usage.
     Returns (reply_text, deduplicated_sources).
     """
-    client, model, fast_model = _get_llm()
+    client, model, _fast_model = _get_llm()
 
     messages = _build_system_messages(history, question)
 
     response = client.chat.completions.create(
-        model=fast_model,
+        model=model,
         messages=messages,
         tools=TOOLS,
         temperature=0,
@@ -291,15 +294,33 @@ def answer(question: str, history: list[dict] | None = None) -> tuple[str, list[
     all_sources: list[dict] = []
 
     if not message.tool_calls:
-        # No tool call — fast model answered directly; re-ask with full model
-        # for higher-quality direct answers.
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=0,
-        )
-        reply = (response.choices[0].message.content or "").strip()
-        return reply if reply else "I'm not sure how to answer that.", all_sources
+        q_lower = question.lower()
+        _item_keywords = ("item", "bug", "task", "pbi", "created", "assigned",
+                          "show", "list", "give me", "what are", "which")
+        needs_tool = any(kw in q_lower for kw in _item_keywords)
+        if needs_tool:
+            messages.append({"role": "assistant", "content": message.content or ""})
+            messages.append({
+                "role": "user",
+                "content": (
+                    "You must call a tool to answer this. Do not make up work item "
+                    "data from memory. Use work_item_statistics with the appropriate "
+                    "action to get real data."
+                ),
+            })
+            retry = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=TOOLS,
+                temperature=0,
+            )
+            message = retry.choices[0].message
+            if not message.tool_calls:
+                reply = (message.content or "").strip()
+                return reply if reply else "I'm not sure how to answer that.", all_sources
+        else:
+            reply = (message.content or "").strip()
+            return reply if reply else "I'm not sure how to answer that.", all_sources
 
     messages.append(message)
 
@@ -332,12 +353,12 @@ def answer_stream(question: str, history: list[dict] | None = None):
     The tool-decision and retrieval steps run non-streaming (fast);
     only the final answer generation is streamed.
     """
-    client, model, fast_model = _get_llm()
+    client, model, _fast_model = _get_llm()
 
     messages = _build_system_messages(history, question)
 
     response = client.chat.completions.create(
-        model=fast_model,
+        model=model,
         messages=messages,
         tools=TOOLS,
         temperature=0,
@@ -346,18 +367,53 @@ def answer_stream(question: str, history: list[dict] | None = None):
     all_sources: list[dict] = []
 
     if not message.tool_calls:
-        stream = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=0,
-            stream=True,
-        )
-        for chunk in stream:
-            delta = chunk.choices[0].delta if chunk.choices else None
-            if delta and delta.content:
-                yield delta.content, None
-        yield "", all_sources
-        return
+        q_lower = question.lower()
+        _item_keywords = ("item", "bug", "task", "pbi", "created", "assigned",
+                          "show", "list", "give me", "what are", "which")
+        needs_tool = any(kw in q_lower for kw in _item_keywords)
+        if needs_tool:
+            messages.append({"role": "assistant", "content": message.content or ""})
+            messages.append({
+                "role": "user",
+                "content": (
+                    "You must call a tool to answer this. Do not make up work item "
+                    "data from memory. Use work_item_statistics with the appropriate "
+                    "action to get real data."
+                ),
+            })
+            retry = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=TOOLS,
+                temperature=0,
+            )
+            message = retry.choices[0].message
+            if not message.tool_calls:
+                stream = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0,
+                    stream=True,
+                )
+                for chunk in stream:
+                    delta = chunk.choices[0].delta if chunk.choices else None
+                    if delta and delta.content:
+                        yield delta.content, None
+                yield "", all_sources
+                return
+        else:
+            stream = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0,
+                stream=True,
+            )
+            for chunk in stream:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta and delta.content:
+                    yield delta.content, None
+            yield "", all_sources
+            return
 
     messages.append(message)
 
